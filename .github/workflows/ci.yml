@@ -1,0 +1,138 @@
+name: ci-cd
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: pip install flake8==7.1.1
+      - name: flake8
+        run: flake8 heart api tests scripts --format=pylint --tee --output-file=flake8-report.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lint-report
+          path: flake8-report.txt
+
+  test:
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: pytest
+        run: >
+          pytest -v --junitxml=reports/junit.xml
+          --cov=heart --cov=api --cov-report=xml:reports/coverage.xml --cov-report=term
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-reports
+          path: reports/*.xml
+
+  train:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Download and clean data
+        run: python -m heart.data
+      - name: EDA figures
+        run: python -m heart.eda
+      - name: Train, tune and track with MLflow
+        run: python -m heart.train 2>&1 | tee training.log
+      - name: Quality gate (CV ROC-AUC >= 0.85)
+        run: |
+          python - <<'EOF'
+          import json, sys
+          meta = json.load(open("models/metadata.json"))
+          auc = meta["cv_metrics"]["roc_auc"]
+          print(f"best={meta['model_name']} cv_roc_auc={auc}")
+          sys.exit(0 if auc >= 0.85 else f"ROC-AUC {auc} below gate 0.85")
+          EOF
+      - name: Job summary
+        run: |
+          echo "## Training results" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat reports/figures/model_comparison.csv >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo '```json' >> "$GITHUB_STEP_SUMMARY"
+          cat models/metadata.json >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: model
+          path: models/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mlflow-runs
+          path: mlruns/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: training-reports
+          path: |
+            reports/figures/
+            training.log
+
+  container:
+    needs: train
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Image name (GHCR requires lowercase)
+        run: echo "IMAGE_NAME=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/heart-api" >> "$GITHUB_ENV"
+      - uses: actions/download-artifact@v4
+        with:
+          name: model
+          path: models/
+      - name: Build image
+        run: docker build -t heart-api:ci -t "$IMAGE_NAME:${GITHUB_SHA::7}" -t "$IMAGE_NAME:latest" .
+      - name: Run container
+        run: docker run -d --name heart-api -p 127.0.0.1:8000:8000 heart-api:ci
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Smoke test
+        run: python scripts/smoke_test.py --url http://127.0.0.1:8000 --timeout 60
+      - name: Container logs
+        if: always()
+        run: docker logs heart-api | tee container.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: container-logs
+          path: container.log
+      - name: Push to GitHub Container Registry
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker push "$IMAGE_NAME:${GITHUB_SHA::7}"
+          docker push "$IMAGE_NAME:latest"

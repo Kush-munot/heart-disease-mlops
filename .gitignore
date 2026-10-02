@@ -1,0 +1,67 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+*.egg
+
+# ---- Virtual environments ----
+.venv/
+venv/
+env/
+.python-version
+
+# ---- Test / lint / coverage output ----
+.pytest_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+reports/*.xml
+
+# ---- Jupyter ----
+.ipynb_checkpoints/
+
+# ---- MLflow (regenerate with `make train`; CI uploads it as the `mlflow-runs` artifact) ----
+# Run metadata stores absolute local paths, so it is not portable across machines.
+mlruns/
+mlartifacts/
+mlflow.db
+
+# ---- Models ----
+# model.joblib + metadata.json are committed so the image builds straight from a clone.
+models/*
+!models/README.md
+!models/model.joblib
+!models/metadata.json
+
+# ---- Logs ----
+*.log
+logs/
+
+# ---- Secrets / local config ----
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+kubeconfig*
+
+# ---- Editors / agent tooling ----
+.vscode/
+.idea/
+.kiro/
+*.swp
+*~
+
+# ---- OS ----
+.DS_Store
+Thumbs.db
+
+# ---- Course material (not ours to publish) ----
+MLOps Assignment 1 Instructions.pdf

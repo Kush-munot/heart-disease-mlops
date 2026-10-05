@@ -71,7 +71,7 @@ curl -s -X POST http://127.0.0.1:8000/predict \
 3. [CI/CD with GitHub Actions](docs/03_GITHUB_ACTIONS.md)
 4. [Container and Kubernetes deployment](docs/04_DEPLOYMENT.md)
 5. [Monitoring and logging](docs/05_MONITORING.md)
-6. [Report draft](docs/REPORT.md)
+6. [Assignment report](docs/REPORT.md)
 
 ## API
 

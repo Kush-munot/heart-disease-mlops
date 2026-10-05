@@ -1,97 +1,245 @@
-# Heart Disease Risk Prediction: MLOps Assignment 1 Report
+# Heart Disease Risk Prediction — MLOps Assignment 1
 
-**Course:** MLOps (AIMLCZG523) · **Name / ID:** _<fill>_ · **Repository:** _<https://github.com/<user>/heart-disease-mlops>_ · **Video:** _<link>_
+**Course:** MLOps (AIMLCZG523)  
+**Student:** Kush Gunendrasing Munot (2025AE05915)  
+**Repository:** https://github.com/Kush-munot/heart-disease-mlops  
+**Demo video:** https://wilpbitspilaniacin0-my.sharepoint.com/:v:/g/personal/2025ae05915_wilp_bits-pilani_ac_in/IQDN2UoJowRAT5bRj-e8uQXwAWYs3LOH2Dwh5nXt6ajqDLc?nav=eyJyZWZlcnJhbEluZm8iOnsicmVmZXJyYWxBcHAiOiJPbmVEcml2ZUZvckJ1c2luZXNzIiwicmVmZXJyYWxBcHBQbGF0Zm9ybSI6IldlYiIsInJlZmVycmFsTW9kZSI6InZpZXciLCJyZWZlcnJhbFZpZXciOiJNeUZpbGVzTGlua0NvcHkifX0&e=E95OZA
 
-> This is a draft. Export it to PDF/DOCX (for example `pandoc docs/REPORT.md -o report.docx`) and paste in the screenshots from `screenshots/`. Rewrite the observations in your own words before submitting.
+## Executive summary
 
-## 1. Problem and approach
-The task is to predict the presence of heart disease from 13 clinical attributes and serve that prediction as a monitored, reproducible API. The project is built as a Python package (`heart/`) that the scripts, notebooks, tests, CI and API all import, so one set of code runs everywhere.
+This project turns a small clinical dataset into a reproducible machine-learning service. The model predicts whether a patient is likely to have heart disease, and the prediction is exposed through a FastAPI endpoint.
 
-## 2. Architecture
+The important part is not only the model score. The same project also shows how the model can be tested, packaged into a container, deployed to Kubernetes, monitored with Prometheus and Grafana, and tracked with MLflow. In other words, the project follows the model from raw data to a running service.
+
+The selected model is a balanced Logistic Regression pipeline. It achieved a cross-validation ROC-AUC of **0.908** and a hold-out ROC-AUC of **0.960**. On the hold-out set it achieved **0.869 accuracy**, **0.813 precision**, **0.929 recall**, and **0.867 F1**.
+
+## 1. Problem and objective
+
+The objective is to predict the presence of heart disease from 13 clinical attributes from the UCI Cleveland heart-disease dataset. The prediction is binary:
+
+- `0` — no disease
+- `1` — disease
+
+The service returns both the predicted class and a probability. This makes the result easier to interpret than a class label alone. For example, a screening application can decide whether a high-probability case should receive further clinical attention.
+
+This is an educational project, not a medical diagnostic tool. The dataset is small and comes from one source, so the results should not be treated as evidence of clinical performance in a different hospital or population.
+
+## 2. System overview
+
+The project is organised as one pipeline rather than separate pieces of experimental code and production code. Data preparation, feature engineering, model training, testing, serving, and monitoring all use the same package code.
 
 ```mermaid
 flowchart TB
-  UCI[(UCI repository)] --> D[heart.data<br/>download + clean]
-  D --> E[heart.eda<br/>figures]
-  D --> T[heart.train<br/>GridSearchCV x 3 models]
-  T <--> M[(MLflow<br/>runs + registry)]
-  T --> A[models/model.joblib<br/>+ metadata.json]
-  subgraph GitHub Actions
-    L[lint] --> U[test] --> TR[train + quality gate] --> C[build + smoke test] --> R[(GHCR)]
-  end
-  A --> IMG[Container image<br/>FastAPI + uvicorn]
-  R --> K
-  IMG --> K[Kubernetes: Deployment x2<br/>LoadBalancer + Ingress]
-  K --> P[Prometheus] --> G[Grafana]
-  K --> LOGS[JSON request logs]
+    UCI[(UCI Cleveland dataset)] --> DATA[Download and clean data]
+    DATA --> EDA[EDA and figures]
+    DATA --> TRAIN[Train and tune models]
+    TRAIN --> MLFLOW[(MLflow runs and registry)]
+    TRAIN --> MODEL[models/model.joblib]
+    MODEL --> API[FastAPI service]
+    API --> IMAGE[Docker image]
+    IMAGE --> K8S[Kubernetes deployment: 2 replicas]
+    K8S --> PROM[Prometheus]
+    PROM --> GRAF[Grafana dashboard]
+    K8S --> LOGS[Structured JSON logs]
 ```
-_(Insert a rendered PNG of this diagram. Paste the mermaid code into https://mermaid.live to export it.)_
 
-## 3. Data acquisition and EDA
-- Source: the UCI Cleveland file (`processed.cleveland.data`) with 303 rows, downloaded by `python -m heart.data`.
-- Cleaning: `?` is read as missing (`ca` has 4, `thal` has 2) and every column is converted to numeric. The 0-4 diagnosis becomes a binary target. No duplicate rows were found.
-- Missing values are imputed **inside the model pipeline** (median/most-frequent), fitted per CV fold, to avoid leakage.
-- Class balance: 164 without disease (54%) and 139 with disease (46%), which is mild imbalance.
-- Strongest correlations with the target: `thal` 0.53, `ca` 0.46, `exang` 0.43, `oldpeak` 0.43, `cp` 0.41, `thalach` -0.42. `fbs` (0.03) and `chol` (0.09) are weak.
-- Categorical insight: asymptomatic chest pain (`cp=4`) has a 73% disease rate against 18-30% for the other types, and a reversible thal defect has 76%.
+The runtime architecture is deliberately simple. Kubernetes runs two API replicas behind a Service. Prometheus discovers the replicas through pod annotations, and Grafana reads the metrics from Prometheus. This keeps the deployment understandable while still demonstrating the main production concerns.
 
-Figures: `eda_class_balance.png`, `eda_numeric_histograms.png`, `eda_categorical_rates.png`, `eda_correlation_heatmap.png`, `eda_outliers.png`.
+## 3. Data preparation and exploratory analysis
 
-## 4. Feature engineering and modelling
-- **Pipeline:** the `ClinicalFeatures` step adds `hr_reserve = thalach / (220 - age)` (the share of age-predicted maximum heart rate reached) and `chol_per_age`. Numeric columns get median imputation and standard scaling. Nominal codes (`cp`, `restecg`, `slope`, `thal`) get most-frequent imputation and one-hot encoding. Binary columns are imputed only.
-- **Split:** a stratified 80/20 split (242 train, 61 test) with `random_state=42`. The test set is only used after model selection.
-- **Tuning:** `GridSearchCV` with stratified 5-fold CV, scoring accuracy, precision, recall, F1 and ROC-AUC, and refitting on ROC-AUC.
+The raw Cleveland file contains **303 rows**. Missing values are represented by `?`; these are converted to missing values before the columns are converted to numeric types. The diagnosis values `0` through `4` are then converted into the binary target used by the model.
 
-| Model | Grid searched | Best params |
-|---|---|---|
-| Logistic Regression | C in {0.01, 0.1, 0.3, 1, 3} x class_weight in {None, balanced} | C=0.3, balanced |
-| Random Forest | n_estimators {200, 400} x max_depth {None, 4, 8} x min_samples_leaf {1, 3, 5} | 400, None, 5 |
-| Gradient Boosting | n_estimators {100, 200} x learning_rate {0.03, 0.1} x max_depth {2, 3} | 100, 0.03, 2 |
+The cleaned dataset contains **164 no-disease cases** and **139 disease cases**. That is a mild class imbalance, so the selected Logistic Regression model uses balanced class weights.
 
-| Model | CV acc | CV prec | CV recall | CV F1 | CV ROC-AUC | Test ROC-AUC |
-|---|---|---|---|---|---|---|
-| **Logistic Regression** | **0.847** | **0.879** | **0.783** | **0.824** | **0.908** | **0.960** |
-| Random Forest | 0.810 | 0.825 | 0.756 | 0.783 | 0.895 | 0.956 |
-| Gradient Boosting | 0.810 | 0.822 | 0.765 | 0.786 | 0.881 | 0.950 |
+Missing-value imputation is part of the scikit-learn pipeline. This matters because the imputer is fitted separately inside each cross-validation fold. Imputing the whole dataset before cross-validation would allow information from the validation fold to leak into training.
 
-**Selection:** Logistic Regression had the best CV ROC-AUC (the selection metric), and it is also the most interpretable model. With under 250 training rows and mostly linear signals, the tree ensembles gave no gain. On the hold-out set it scored accuracy 0.869, precision 0.813, recall 0.929 and F1 0.867 (TP 26, FN 2, FP 6, TN 27). High recall matters most for a screening use case, because a missed disease case costs far more than a false alarm.
+### EDA observations
 
-**Most important features** (absolute coefficient): `ca`, `sex`, `cp=4`, `thal=7`, `thal=3`, `exang`.
+The strongest relationships with the target are associated with `thal`, `ca`, `exang`, `oldpeak`, `cp`, and `thalach`. Some simple clinical patterns are also visible: asymptomatic chest pain has a higher disease rate than the other chest-pain categories, and reversible thallium defects are associated with a higher disease rate.
 
-## 5. Experiment tracking (MLflow)
-- The experiment `heart-disease-classification` has one parent run `model-selection` and 3 nested runs.
-- Logged per run: best params, `cv_*` mean and std, `test_*`, the confusion matrix, ROC curve, feature importance, the full `cv_results.csv`, and the model with its signature and input example.
-- The best model is registered as `heart-disease-classifier` (the version increments on each training run).
-- _Screenshots: experiment list, 3-run comparison chart, artifacts view, model registry._
+The charts below are the saved project figures used to support these observations.
+
+![Class balance](../reports/figures/eda_class_balance.png)
+
+*Figure 1. The target is mildly imbalanced, but both classes have enough examples for a stratified split.*
+
+![Numeric distributions](../reports/figures/eda_numeric_histograms.png)
+
+*Figure 2. Numeric feature distributions used to understand scale, skew, and possible outliers.*
+
+![Categorical rates](../reports/figures/eda_categorical_rates.png)
+
+*Figure 3. Disease rate by selected categorical clinical variables.*
+
+![Correlation heatmap](../reports/figures/eda_correlation_heatmap.png)
+
+*Figure 4. Correlations between the cleaned variables and the binary target.*
+
+## 4. Feature engineering and model development
+
+The data is split into **242 training rows** and **61 hold-out test rows** using a stratified 80/20 split with `random_state=42`. The hold-out set is kept untouched until the final evaluation.
+
+The feature pipeline performs the following work:
+
+1. Adds `hr_reserve`, which compares achieved heart rate with an age-predicted maximum.
+2. Adds `chol_per_age` as a simple age-adjusted cholesterol feature.
+3. Imputes numeric and categorical values using separate strategies.
+4. Standardises numeric variables.
+5. One-hot encodes nominal categorical variables.
+6. Fits the classifier only after all preprocessing steps are inside the pipeline.
+
+Three models were compared with stratified five-fold `GridSearchCV`:
+
+| Model | Selected configuration | CV accuracy | CV precision | CV recall | CV F1 | CV ROC-AUC | Test ROC-AUC |
+|---|---|---:|---:|---:|---:|---:|---:|
+| **Logistic Regression** | `C=0.3`, balanced weights | **0.847** | **0.879** | **0.783** | **0.824** | **0.908** | **0.960** |
+| Random Forest | 400 trees, minimum leaf size 5 | 0.810 | 0.825 | 0.756 | 0.783 | 0.895 | 0.956 |
+| Gradient Boosting | 100 estimators, learning rate 0.03, depth 2 | 0.810 | 0.822 | 0.765 | 0.786 | 0.881 | 0.950 |
+
+![Model comparison](../reports/figures/model_comparison.png)
+
+*Figure 5. Logistic Regression gives the strongest cross-validation result and the best hold-out ROC-AUC.*
+
+Logistic Regression was selected because it performed best on the chosen selection metric and remains relatively easy to interpret. Its hold-out recall was **0.929**, meaning it missed only two of the 28 positive cases in the test set. For a screening-oriented example, that is preferable to choosing a model with slightly fewer false alarms but more missed positive cases.
+
+![Confusion matrix](../reports/figures/best_confusion_matrix.png)
+
+*Figure 6. Hold-out confusion matrix for the selected model.*
+
+![ROC curve](../reports/figures/best_roc_curve.png)
+
+*Figure 7. Hold-out ROC curve for the selected model.*
+
+![Feature importance](../reports/figures/best_feature_importance.png)
+
+*Figure 8. Largest absolute model coefficients for the selected pipeline.*
+
+## 5. Experiment tracking with MLflow
+
+The experiment is named `heart-disease-classification`. The training run contains one parent run called `model-selection` and three nested candidate runs:
+
+- `logistic_regression`
+- `random_forest`
+- `gradient_boosting`
+
+Each candidate records its parameters, cross-validation metrics, hold-out metrics, and model metadata. The selected model is registered as `heart-disease-classifier`, version 1 in the local experiment store.
+
+The repository also contains the MLflow evaluation artifacts, including the confusion matrix, ROC curve, feature-importance figure, cross-validation results, and serialized model. The saved model is additionally copied to `models/model.joblib` for serving.
+
+### Runtime screenshot evidence
+
+The local verification run captured the MLflow experiment view, the registered-model view, Swagger prediction output, Prometheus targets, and the Grafana dashboard. The repository currently contains the screenshot checklist in `screenshots/README.md`, but the runtime PNG files have not been copied into `screenshots/` yet. Add them there using the filenames below before exporting the final report:
+
+| File | Evidence |
+|---|---|
+| `01_mlflow_experiments.png` | Parent run and three nested model runs |
+| `04_mlflow_registry.png` | Registered model and version 1 |
+| `05_pytest.png` | Passing test output |
+| `10_container_smoke.png` | Container smoke test |
+| `11_k8s_resources.png` | Kubernetes resources and Ingress |
+| `12_k8s_predict_lb.png` | Prediction through the LoadBalancer/port-forward |
+| `13_k8s_ingress.png` | Prediction through the `heart.local` Ingress |
+| `14_swagger.png` | Successful prediction from Swagger UI |
+| `15_prometheus_targets.png` | API targets shown as UP |
+| `16_grafana_dashboard.png` | Dashboard populated with generated traffic |
+| `17_json_logs.png` | Structured JSON request logs |
 
 ## 6. Packaging and reproducibility
-- `models/model.joblib` holds the complete preprocessing and classifier pipeline, and the MLflow model format holds it as well. `metadata.json` records the metrics, versions and run id.
-- Pinned `requirements.txt` for development and `api/requirements.txt` for serving; fixed random seeds.
-- A clean-setup proof runs in CI: a fresh runner installs from `requirements.txt`, downloads the data, trains, builds and tests.
 
-## 7. CI/CD and testing
-- 29 pytest tests: data (5), features (5), model (9), API (10). They use synthetic fixtures, so they do not depend on the network.
-- GitHub Actions runs lint -> test -> train (with a quality gate of ROC-AUC >= 0.85) -> container build, smoke test and push to GHCR.
-- Artifacts per run: lint report, JUnit and coverage XML, model, mlruns, figures, container logs.
-- _Screenshots: green run graph, job summary, artifacts, a deliberately failing PR._
+The serving image is based on `python:3.12-slim` and installs only the API dependencies. It copies the model pipeline and the Python package required to unpickle the custom transformer. The container runs as a non-root user.
 
-## 8. Containerisation and deployment
-- FastAPI endpoints: `/predict` (JSON in; prediction, label, probability and confidence out), `/health`, `/model-info`, `/metrics`. Pydantic validates ranges and allowed codes and returns 422 on bad input.
-- Image: `python:3.12-slim`, non-root, about 520 MB, verified with `scripts/smoke_test.py`.
-- Kubernetes on Minikube: 2 replicas, rolling updates, probes, resource limits, read-only root filesystem, a LoadBalancer Service (via `minikube tunnel`) and an nginx Ingress (`heart.local`).
-- _Screenshots: `kubectl get all,ingress`, curl through the LoadBalancer and the Ingress, Swagger UI._
+The model package is reproducible because:
+
+- development and serving dependencies are pinned in requirements files;
+- the train/test split and model searches use fixed random seeds;
+- preprocessing is stored with the classifier in the joblib pipeline;
+- `models/metadata.json` records the selected model, metrics, training time, and MLflow run information;
+- the CI workflow trains from a clean checkout before building the image.
+
+## 7. Testing and CI/CD
+
+The local test run completed with **29 passed tests**. The test suite covers data cleaning, feature engineering, model behaviour, validation, and API responses. Flake8 also completed successfully.
+
+The GitHub Actions workflow is intentionally sequential:
+
+```mermaid
+flowchart LR
+    L[Lint] --> T[Tests and coverage]
+    T --> R[Train and quality gate]
+    R --> C[Build and smoke test]
+    C --> P[Push to GHCR on main]
+```
+
+The training job has a quality gate requiring CV ROC-AUC to be at least `0.85`. The current model reaches `0.908`, so it passes the gate. If linting, tests, training, the quality gate, or the container smoke test fails, later jobs are skipped.
+
+The workflow also uploads useful artifacts: lint output, JUnit and coverage reports, the trained model, MLflow runs, training figures, and container logs.
+
+## 8. Container and Kubernetes deployment
+
+The Docker image was built successfully as `localhost/heart-api:local`. The standalone container returned the expected results for both a higher-risk and a lower-risk sample:
+
+```text
+health: {'status': 'ok', 'model_name': 'logistic_regression'}
+sample_request.json: prediction=1, label=disease, probability_disease=0.8756
+sample_request_low_risk.json: prediction=0, label=no_disease, probability_disease=0.069
+smoke test passed
+```
+
+The Kubernetes deployment uses two API replicas. Each pod has readiness and liveness probes on `/health`, CPU and memory requests/limits, a read-only root filesystem, a non-root user, and dropped Linux capabilities. The rolling-update strategy uses `maxUnavailable: 0`, so an update can replace pods without intentionally reducing the available replica count.
+
+The local deployment was verified with:
+
+- two `heart-api` pods in `Running` and `Ready` state;
+- one Prometheus pod and one Grafana pod;
+- a LoadBalancer Service with a local external address after starting `minikube tunnel`;
+- an nginx Ingress for `heart.local`;
+- successful health and prediction requests;
+- a successful rolling restart of the API deployment.
+
+On this Windows machine, the Ingress was tested with an explicit `Host: heart.local` header because editing the system hosts file requires administrator permission. The Kubernetes port-forward remains the simplest repeatable local Swagger route.
 
 ## 9. Monitoring and logging
-- One JSON log line per request (request id, path, status, latency) and per prediction.
-- Prometheus metrics: request counter, latency histogram, prediction-label counter, probability histogram, model-loaded gauge. Pods are auto-discovered in Kubernetes.
-- The Grafana dashboard shows traffic, error and validation rates, p50/p95 latency, the prediction mix, and the mean predicted probability as a drift signal.
-- _Screenshots: Prometheus targets, Grafana dashboard under generated traffic._
+
+The API exposes Prometheus metrics at `/metrics`. The metrics include request totals, request duration, prediction counts, disease-probability distribution, and a model-loaded gauge.
+
+The API writes one JSON object per request. A typical entry contains the request ID, HTTP method, path, status code, latency, and client address. Prediction events additionally record the class label, probability, and confidence. This format is easy to send to a log collector later.
+
+During verification, generated traffic populated the Grafana dashboard. The dashboard showed request rate, validation errors, latency, prediction mix, mean predicted probability, total predictions, and model-loaded status. Prometheus reported both API replicas as UP.
 
 ## 10. Limitations and next steps
-- The dataset is small (303 rows, one hospital), so there is uncertainty in the metrics (CV ROC-AUC std is about 0.02) and in generalisation.
-- The API has no authentication; add an API key or OAuth proxy before any public exposure.
-- Drift detection is a probability-mean signal only; Evidently or a similar tool could add feature-level drift reports.
-- The model is baked into the image; a next step is to load `models:/heart-disease-classifier/Production` from an MLflow server at startup.
 
-## Appendix: how to run
-See `README.md` and `docs/01_SETUP.md` through `docs/05_MONITORING.md`.
+The main limitation is the dataset itself: 303 rows from one source are not enough to establish reliable clinical generalisation. The reported metrics are useful for demonstrating the MLOps workflow, but they should not be interpreted as a medical validation study.
+
+The API also has no authentication. It binds to localhost in the local setup, but an API key, OAuth proxy, or gateway would be required before public exposure. The current drift signal is based on prediction probabilities; a future version could add feature-level drift checks with a tool such as Evidently.
+
+Finally, the model is currently packaged into the image. A more flexible production design would load a specific approved model version from an MLflow server at startup, with an explicit rollback process.
+
+## 11. Reproducing the local demonstration
+
+On Windows with Docker Desktop, the shortest path is:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\scripts\start_all.ps1
+```
+
+The launcher builds the image, starts Minikube, enables the required addons, loads the image into Minikube, applies the Kubernetes resources, waits for the deployments, and starts the API, Prometheus, Grafana, and tunnel port-forwards.
+
+Open:
+
+| Service | URL |
+|---|---|
+| Swagger UI | http://127.0.0.1:8000/docs |
+| Prometheus targets | http://127.0.0.1:9090/targets |
+| Grafana | http://127.0.0.1:3000 |
+| MLflow | http://127.0.0.1:5000 |
+
+Grafana uses the local credentials configured by the launcher.
+
+To stop the local cluster after the demonstration:
+
+```powershell
+minikube stop
+```
+
+For the final submission, add the runtime screenshots listed in Section 5 and add the short demonstration-video link at the top of this document.

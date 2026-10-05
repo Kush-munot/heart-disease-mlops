@@ -61,12 +61,15 @@ To view the CI experiment runs locally, download `mlflow-runs` and run `mlflow u
 
 ## 3.5 Demonstrating failure handling (worth a screenshot)
 
-Break something on a branch and open a PR:
+Break something on a branch and open a PR. On Windows, use PowerShell to change the expected value:
 ```bash
 git checkout -b demo/failing-test
-sed -i '' 's/assert len(df) == 4/assert len(df) == 5/' tests/test_data.py   # Linux: sed -i
 git commit -am "demo: break a test" && git push -u origin demo/failing-test
 gh pr create --fill
+```
+The equivalent PowerShell edit is:
+```powershell
+(Get-Content tests/test_data.py) -replace 'assert len\(df\) == 4', 'assert len(df) == 5' | Set-Content tests/test_data.py
 ```
 The `test` job goes red, `train` and `container` are skipped, and the log points to the exact assertion. Capture the screenshot, then close the PR and delete the branch.
 
@@ -80,9 +83,18 @@ The same works for lint: add `import os` unused at the top of `heart/predict.py`
 - The GHCR package page.
 
 ## 3.7 Running the same checks locally before pushing
-```bash
-make lint test train image run smoke
+```powershell
+python -m flake8 heart api tests scripts
+python -m pytest -v --cov=heart --cov=api
+python -m heart.data
+python -m heart.eda
+python -m heart.train
+docker build -t localhost/heart-api:local .
+docker run --rm -d --name heart-api -p 127.0.0.1:8000:8000 localhost/heart-api:local
+python scripts/smoke_test.py --url http://127.0.0.1:8000
+docker stop heart-api
 ```
+On Windows, run these commands in PowerShell. The repository's `Makefile` remains available for Unix-like environments, but is not required by the Windows workflow.
 
 ## 3.8 Jenkins alternative (not used)
 The assignment allows Jenkins. The same four stages map one-to-one to a declarative `Jenkinsfile` with `stage('Lint')`, `stage('Test')`, `stage('Train')` and `stage('Container')`, using `archiveArtifacts` and `junit 'reports/junit.xml'`. GitHub Actions was chosen because it needs no server to host.

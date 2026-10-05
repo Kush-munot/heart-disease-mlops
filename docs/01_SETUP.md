@@ -1,107 +1,312 @@
 # 1. Setup and running locally
 
-This guide goes from a clean clone to a trained model, a running API and tracked experiments. Every command runs from the repo root.
+This guide describes the verified Windows workflow for the project. Commands use PowerShell and should be run from the repository root.
 
-## 1.1 Prerequisites
+For detailed Windows troubleshooting, see [06_WINDOWS_DOCKER_SETUP.md](06_WINDOWS_DOCKER_SETUP.md).
 
-| Tool | Version used | Needed for |
-|---|---|---|
-| Python | 3.12 | everything |
-| Git | any recent | version control |
-| Podman (or Docker) | Podman 5+/6 | container build/run |
-| make | preinstalled on macOS/Linux | shortcuts (optional) |
+## 1.1 What the project does
 
-Installation steps for each tool are in [02_EXTERNAL_TOOLS.md](02_EXTERNAL_TOOLS.md).
+The project cleans the UCI Cleveland heart-disease data, trains and compares three models, tracks the runs with MLflow, packages the selected model in a FastAPI Docker image, and deploys the service to Kubernetes with Prometheus and Grafana monitoring.
 
-## 1.2 Create the environment
+The repository already contains the trained model at models/model.joblib, so the API can be built without retraining.
 
-```bash
-git clone https://github.com/<your-user>/heart-disease-mlops.git
-cd heart-disease-mlops
-python3.12 -m venv .venv
-source .venv/bin/activate            # Windows: .venv\Scripts\activate
+## 1.2 Prerequisites
+
+| Tool | Purpose |
+|---|---|
+| Docker Desktop | Builds and runs the API and local monitoring services |
+| Minikube | Runs the local Kubernetes cluster |
+| kubectl | Applies Kubernetes manifests and checks resources |
+| Python 3.12 | Optional for training, tests, linting, and traffic generation |
+| Git | Clones and updates the repository |
+
+Check the tools:
+
+~~~powershell
+docker --version
+docker compose version
+minikube version
+kubectl version --client
+~~~
+
+Start Docker Desktop before using Docker or Minikube. The Docker engine must be running, not only the desktop window.
+
+## 1.3 Clone the repository
+
+~~~powershell
+git clone https://github.com/Kush-munot/heart-disease-mlops
+Set-Location heart-disease-mlops
+~~~
+
+For the existing checkout:
+
+~~~powershell
+Set-Location D:\Github\MLOPS
+~~~
+
+## 1.4 Optional Python environment
+
+Python is needed for local training and tests. It is not required to run the committed model through Docker.
+
+~~~powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
-pip install -r requirements.txt
-```
+python -m pip install -r requirements.txt
+~~~
 
-Every dependency in `requirements.txt` is pinned to an exact version, so a clean install matches CI and the container. The container uses the smaller `api/requirements.txt`: the same pins, minus MLflow, the plotting libraries and the test tools.
+If PowerShell blocks activation:
 
-On macOS, if `python -m venv` produces an environment without pip (an `ensurepip` failure), install Python from python.org or run `brew reinstall python@3.12`. Conda also works: `conda create -n heart python=3.12 && conda activate heart && pip install -r requirements.txt`.
+~~~powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\.venv\Scripts\Activate.ps1
+~~~
 
-## 1.3 Pipeline step by step
+## 1.5 Train and test locally
 
-| Step | Command | Output |
-|---|---|---|
-| 1. Get + clean data | `make data` (= `python -m heart.data`) | `data/raw/processed.cleveland.data`, `data/processed/heart_clean.csv` |
-| 2. EDA figures | `make eda` (= `python -m heart.eda`) | `reports/figures/eda_*.png` |
-| 3. Train + track | `make train` (= `python -m heart.train`) | `mlruns/`, `models/model.joblib`, `models/metadata.json`, `reports/figures/best_*.png` |
-| 4. Tests | `make test` | 29 passing tests + coverage |
-| 5. Lint | `make lint` | no output = clean |
-| 6. Serve locally | `make serve` | API on http://127.0.0.1:8000 |
+~~~powershell
+python -m heart.data
+python -m heart.eda
+python -m heart.train
+python -m pytest -v --cov=heart --cov=api
+python -m flake8 heart api tests scripts
+~~~
 
-### Data acquisition
-`heart/data.py` downloads `processed.cleveland.data` from the UCI repository:
-https://archive.ics.uci.edu/ml/machine-learning-databases/heart-disease/processed.cleveland.data
+The commands create the cleaned data, EDA figures, MLflow runs, model files, and metadata. The verified test run completed with 29 passing tests and Flake8 passed.
 
-It caches the file in `data/raw/`. Pass `--force` to download it again. The script then:
-- names the 14 columns and reads `?` as missing (4 rows in `ca`, 2 in `thal`);
-- converts every column to numeric;
-- turns the 0-4 diagnosis `num` into the binary `target` (0 = none, 1 = any disease);
-- drops exact duplicate rows.
+The current selected model is balanced Logistic Regression. Its CV ROC-AUC is 0.908 and its hold-out ROC-AUC is 0.960.
 
-Missing values are left in the cleaned CSV on purpose. The model pipeline imputes them, learning the fill values on training folds only, which avoids test-set leakage.
+## 1.6 Build and run the API container
 
-Manual alternative: download the file from https://archive.ics.uci.edu/dataset/45/heart+disease (the `processed.cleveland.data` file inside the zip), save it to `data/raw/`, then run `make data`.
+Build the image:
 
-### Training options
-```bash
-python -m heart.train --folds 5 --experiment heart-disease-classification
-python -m heart.train --no-register        # skip the MLflow model-registry step
-MLFLOW_TRACKING_URI=http://127.0.0.1:5000 python -m heart.train   # log to an MLflow server
-```
+~~~powershell
+docker build --progress=plain -t localhost/heart-api:local .
+~~~
 
-### Notebooks
-```bash
-jupyter lab                    # open notebooks/01_eda.ipynb, 02_training.ipynb, 03_inference.ipynb
-make notebooks                 # re-execute all three headlessly
-```
-The notebooks call the same `heart` package as the scripts, so both paths produce the same results.
+Run it:
 
-## 1.4 Experiment tracking UI
+~~~powershell
+docker run --rm -d --name heart-api -p 127.0.0.1:8000:8000 localhost/heart-api:local
+~~~
 
-```bash
-make mlflow-ui     # mlflow ui --backend-store-uri ./mlruns --host 127.0.0.1 --port 5000
-```
-Open http://127.0.0.1:5000 and select the experiment **heart-disease-classification**:
-- A parent run `model-selection` holds the comparison table and chart, the best-model tags and `metadata.json`.
-- There is one nested run per model family. Each has its best hyper-parameters, `cv_*` metrics (mean and std), `test_*` metrics, `evaluation/` artifacts (confusion matrix, ROC curve, feature importance, full `cv_results.csv`) and the logged `model` with its signature and input example.
-- The **Models** tab shows `heart-disease-classifier`, with a new version for every training run.
+Open Swagger at [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs).
 
-Screenshots to capture: the experiment list, a run-comparison view (select the 3 nested runs, then Compare), one run's artifacts, and the registered model.
+The health endpoint should return:
 
-## 1.5 Run the API
+~~~json
+{"status":"ok","model_name":"logistic_regression"}
+~~~
 
-Without a container:
-```bash
-make serve                                        # uvicorn with --reload on 127.0.0.1:8000
-python scripts/smoke_test.py                      # health, two predictions, 422 check, metrics
-```
+The verified sample results were:
 
-With a container:
-```bash
-make image          # podman build -t localhost/heart-api:local .
-make run            # podman run -d -p 127.0.0.1:8000:8000 ...
-make smoke
-podman logs -f heart-api
-podman stop heart-api
-```
-For Docker, use `make image run ENGINE=docker`.
+| Sample | Prediction | Label | Disease probability |
+|---|---:|---|---:|
+| sample_request.json | 1 | disease | 0.8756 |
+| sample_request_low_risk.json | 0 | no_disease | 0.069 |
 
-## 1.6 Reproducibility checklist
+Stop the standalone container:
 
-- Every package is pinned in `requirements.txt` and `api/requirements.txt`.
-- `RANDOM_STATE=42` is used for the split, the CV folds and the models (`heart/config.py`).
-- Preprocessing lives inside the saved pipeline, so raw JSON goes straight in and no hand-coded transforms are needed at serving time.
-- `models/metadata.json` records the model, parameters, metrics, sklearn and Python versions, a timestamp and the MLflow run id.
-- The MLflow model artifact can be loaded independently: `mlflow.sklearn.load_model("models:/heart-disease-classifier/1")`.
-- To prove a clean setup works, run `make clean && make data train test image run smoke`.
+~~~powershell
+docker stop heart-api
+~~~
+
+If Python is installed locally, run:
+
+~~~powershell
+python scripts/smoke_test.py --url http://127.0.0.1:8000
+~~~
+
+## 1.7 Run Docker Compose
+
+Compose starts the API, Prometheus, and Grafana. Do not run Compose at the same time as the Kubernetes port-forwards because both use ports 8000, 9090, and 3000.
+
+~~~powershell
+$env:GRAFANA_PASSWORD = 'assignment-demo-2026'
+docker compose up -d --build
+docker compose ps
+~~~
+
+Open:
+
+| Service | URL |
+|---|---|
+| API Swagger | http://127.0.0.1:8000/docs |
+| Prometheus targets | http://127.0.0.1:9090/targets |
+| Grafana | http://127.0.0.1:3000 |
+
+Grafana credentials:
+
+~~~text
+Username: admin
+Password: assignment-demo-2026
+~~~
+
+Generate dashboard traffic when Python is installed:
+
+~~~powershell
+python scripts/generate_traffic.py --url http://127.0.0.1:8000 --count 300 --delay 0.01
+~~~
+
+Stop Compose:
+
+~~~powershell
+docker compose down
+~~~
+
+## 1.8 Recommended Kubernetes startup
+
+Use the Windows launcher for the full deployment:
+
+~~~powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\scripts\start_all.ps1
+~~~
+
+The launcher starts Docker Desktop if needed, builds and loads the image, starts Minikube, enables Ingress and metrics-server, applies the Kubernetes resources, waits for all deployments, starts the tunnel and port-forwards, and verifies the API health endpoint.
+
+The default mode is Kubernetes. Compose is an alternative:
+
+~~~powershell
+.\scripts\start_all.ps1 -Mode compose
+~~~
+
+Use one mode at a time.
+
+## 1.9 Manual Kubernetes workflow
+
+Use these commands when the launcher needs troubleshooting:
+
+~~~powershell
+minikube start --driver=docker --cpus=2 --memory=4096
+minikube addons enable ingress
+minikube addons enable metrics-server
+docker build -t localhost/heart-api:local .
+minikube image load localhost/heart-api:local
+kubectl apply -f .\k8s\namespace.yaml
+~~~
+
+Create the Grafana ConfigMaps and Secret:
+
+~~~powershell
+kubectl -n heart-ml create configmap grafana-datasources --from-file=datasource.yml=.\monitoring\grafana\provisioning\datasources\datasource.yml --dry-run=client -o yaml | kubectl apply -f -
+kubectl -n heart-ml create configmap grafana-dashboard-provider --from-file=dashboard.yml=.\monitoring\grafana\provisioning\dashboards\dashboard.yml --dry-run=client -o yaml | kubectl apply -f -
+kubectl -n heart-ml create configmap grafana-dashboards --from-file=heart-api.json=.\monitoring\grafana\dashboards\heart-api.json --dry-run=client -o yaml | kubectl apply -f -
+kubectl -n heart-ml create secret generic grafana-admin --from-literal=password=assignment-demo-2026 --dry-run=client -o yaml | kubectl apply -f -
+~~~
+
+Apply the application and monitoring manifests:
+
+~~~powershell
+kubectl apply -f .\k8s\deployment.yaml -f .\k8s\service.yaml
+kubectl apply -f .\k8s\monitoring\
+kubectl apply -f .\k8s\ingress.yaml
+kubectl -n heart-ml rollout status deployment/heart-api --timeout=180s
+kubectl -n heart-ml rollout status deployment/prometheus --timeout=180s
+kubectl -n heart-ml rollout status deployment/grafana --timeout=180s
+~~~
+
+Start these in separate PowerShell windows:
+
+~~~powershell
+minikube tunnel
+kubectl -n heart-ml port-forward service/heart-api 8000:8000
+kubectl -n heart-ml port-forward service/prometheus 9090:9090
+kubectl -n heart-ml port-forward service/grafana 3000:3000
+~~~
+
+## 1.10 Verify Kubernetes
+
+~~~powershell
+minikube status
+kubectl get nodes
+kubectl -n heart-ml get pods,svc,ingress -o wide
+Invoke-WebRequest http://127.0.0.1:8000/health
+~~~
+
+Expected state:
+
+- two Ready heart-api pods;
+- one Prometheus pod;
+- one Grafana pod;
+- a heart-api LoadBalancer Service;
+- an nginx Ingress for heart.local.
+
+If Windows cannot edit the hosts file, test the Ingress with an explicit Host header:
+
+~~~powershell
+Invoke-WebRequest http://127.0.0.1/health -Headers @{ Host = 'heart.local' }
+~~~
+
+Generate traffic and inspect the dashboards:
+
+~~~powershell
+python scripts/generate_traffic.py --url http://127.0.0.1:8000 --count 300 --delay 0.01
+~~~
+
+Prometheus should show both API replicas as UP. Grafana should show request rate, latency, validation errors, prediction mix, total predictions, and model-loaded status.
+
+Demonstrate a rolling update:
+
+~~~powershell
+kubectl -n heart-ml rollout restart deployment/heart-api
+kubectl -n heart-ml rollout status deployment/heart-api
+kubectl -n heart-ml logs -l app=heart-api --prefix --tail=20
+~~~
+
+## 1.11 MLflow UI
+
+MLflow is separate from the Kubernetes launcher. With Python and MLflow installed:
+
+~~~powershell
+mlflow ui --backend-store-uri .\mlruns --host 127.0.0.1 --port 5000
+~~~
+
+Open [http://127.0.0.1:5000](http://127.0.0.1:5000) and inspect the heart-disease-classification experiment and heart-disease-classifier model.
+
+Without local Python, use a temporary container:
+
+~~~powershell
+docker run --rm -d --name mlflow-ui -p 127.0.0.1:5000:5000 -v "$($PWD):/workspace" -w /workspace python:3.12-slim sh -c "python -m pip install -q mlflow==2.17.2 && mlflow ui --backend-store-uri ./mlruns --host 0.0.0.0 --port 5000"
+~~~
+
+Stop it when finished:
+
+~~~powershell
+docker rm -f mlflow-ui
+~~~
+
+## 1.12 Troubleshooting
+
+| Problem | Fix |
+|---|---|
+| Docker cannot connect | Start Docker Desktop and wait until the engine is Running. |
+| Swagger does not open but Prometheus and Grafana do | Restart the API forward: kubectl -n heart-ml port-forward service/heart-api 8000:8000. |
+| ErrImageNeverPull | Rebuild the image and run minikube image load localhost/heart-api:local. |
+| API pod is Running but not Ready | Inspect kubectl -n heart-ml logs -l app=heart-api. |
+| LoadBalancer external IP is pending | Keep minikube tunnel running or use the API port-forward. |
+| Ingress returns 404 | Send the Host header heart.local and check the Ingress resource. |
+| Port 8000, 9090, or 3000 is busy | Stop the conflicting container or port-forward. |
+| PowerShell blocks the launcher | Run Set-ExecutionPolicy -Scope Process Bypass. |
+
+## 1.13 Clean shutdown
+
+For Kubernetes:
+
+~~~powershell
+minikube stop
+~~~
+
+For Compose:
+
+~~~powershell
+docker compose down
+~~~
+
+To remove the Kubernetes namespace:
+
+~~~powershell
+kubectl delete namespace heart-ml --ignore-not-found
+~~~
+
+Use minikube delete only when the cluster should be removed and recreated from scratch.

@@ -34,8 +34,8 @@ Start Docker Desktop and wait until it reports that Docker is running. Then open
 
 ```powershell
 git --version
-python --version
-pip --version
+py -3.12 --version
+py -m pip --version
 docker --version
 docker compose version
 minikube version
@@ -52,7 +52,7 @@ Replace the URL with the actual public repository URL:
 
 ```powershell
 Set-Location $HOME
-git clone https://github.com/YOUR_GITHUB_USERNAME/heart-disease-mlops.git
+git clone https://github.com/Kush-munot/heart-disease-mlops.git
 Set-Location .\heart-disease-mlops
 git status
 Get-ChildItem
@@ -65,6 +65,17 @@ All remaining commands in this document assume the current directory is the repo
 ```powershell
 Set-Location "$HOME\heart-disease-mlops"
 ```
+
+### Recommended one-command Kubernetes path
+
+After Docker Desktop is running and the repository is open, the launcher performs the complete deployment in the correct order:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\scripts\start_all.ps1
+```
+
+It builds and loads the image, starts Minikube, enables Ingress and metrics-server, applies the Kubernetes resources, waits for the API, Prometheus, and Grafana deployments, and starts the tunnel and port-forwards. Use `-Mode compose` when you want the Docker Compose stack instead of Kubernetes. Do not run both modes together because they use the same local ports.
 
 ## 4. Prepare Python locally
 
@@ -253,18 +264,19 @@ kubectl get pods -n ingress-nginx -o wide
 kubectl get ingressclass
 ```
 
-## 9. Build the image inside Minikube
+## 9. Load the image into Minikube
 
-The Kubernetes Deployment uses `imagePullPolicy: Never`, so Kubernetes must be able to find the image in Minikube's image store. The simplest Windows method is to build directly inside Minikube:
+The Kubernetes Deployment uses `imagePullPolicy: Never`, so Kubernetes must be able to find the image in Minikube's image store. The verified Windows method is to build with Docker Desktop and load the image explicitly:
 
 ```powershell
-minikube image build -t localhost/heart-api:local .
+docker build -t localhost/heart-api:local .
+minikube image load localhost/heart-api:local
 minikube image ls | Select-String "heart-api"
 ```
 
 The output should contain `localhost/heart-api:local`.
 
-If `minikube image build` is unavailable, build with Docker and load the image explicitly:
+Alternatively, Minikube can build the image directly:
 
 ```powershell
 docker build -t localhost/heart-api:local .
@@ -412,6 +424,14 @@ kubectl get ingressclass
 kubectl -n heart-ml get ingress
 kubectl -n ingress-nginx get pods
 ```
+
+If editing the Windows hosts file is not permitted, test the same Ingress route with an explicit Host header:
+
+```powershell
+Invoke-WebRequest http://127.0.0.1/health -Headers @{ Host = 'heart.local' } | Select-Object -ExpandProperty Content
+```
+
+The API port-forward at `http://127.0.0.1:8000/docs` is the reliable Swagger URL for the local demonstration.
 
 ## 12. Access Kubernetes monitoring
 

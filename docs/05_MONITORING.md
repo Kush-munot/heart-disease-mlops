@@ -11,11 +11,11 @@
 ```
 Other events are `model_loaded` and `model_missing` at startup. Set the log level with `LOG_LEVEL`.
 
-Where to read the logs:
-```bash
-podman logs -f heart-api                                   # container
-kubectl -n heart-ml logs -l app=heart-api -f --prefix      # all pods
-kubectl -n heart-ml logs -l app=heart-api | grep '"event": "prediction"' | tail
+Where to read the logs on Windows:
+```powershell
+docker logs -f heart-api
+kubectl -n heart-ml logs -l app=heart-api -f --prefix
+kubectl -n heart-ml logs -l app=heart-api --prefix --tail=100
 ```
 The logs are one JSON object per line, so a log shipper such as Loki/Promtail, Fluent Bit or CloudWatch can parse them without extra configuration.
 
@@ -31,13 +31,13 @@ The logs are one JSON object per line, so a log shipper such as Loki/Promtail, F
 
 The `path` label uses the route template, and unknown URLs become `unmatched`. This keeps label cardinality bounded.
 
-## 5.3 Local stack (Podman/Docker compose)
+## 5.3 Local stack with Docker Compose
 
-```bash
-make image
-export GRAFANA_PASSWORD='pick-a-password'
-podman compose up -d            # or docker compose up -d
-python scripts/generate_traffic.py --count 300      # traffic that includes about 10% invalid requests
+```powershell
+docker build -t localhost/heart-api:local .
+$env:GRAFANA_PASSWORD = 'assignment-demo-2026'
+docker compose up -d
+python scripts/generate_traffic.py --url http://127.0.0.1:8000 --count 300 --delay 0.01
 ```
 | UI | URL |
 |---|---|
@@ -45,33 +45,23 @@ python scripts/generate_traffic.py --count 300      # traffic that includes abou
 | Prometheus | http://127.0.0.1:9090 (Status -> Targets: `heart-api` should be UP) |
 | Grafana | http://127.0.0.1:3000 (admin / `$GRAFANA_PASSWORD`), dashboard "Heart Disease API" |
 
-Stop it with `podman compose down`.
-
-If no compose provider is installed, run the same three containers by hand on a shared network:
-```bash
-podman network create heartnet
-podman run -d --name heart-api --network heartnet -p 127.0.0.1:8000:8000 localhost/heart-api:local
-podman run -d --name prometheus --network heartnet -p 127.0.0.1:9090:9090 \
-  -v "$PWD/monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro" \
-  docker.io/prom/prometheus:v2.54.1
-podman run -d --name grafana --network heartnet -p 127.0.0.1:3000:3000 \
-  -e GF_SECURITY_ADMIN_PASSWORD="$GRAFANA_PASSWORD" \
-  -e GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/heart-api.json \
-  -v "$PWD/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro" \
-  -v "$PWD/monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro" \
-  docker.io/grafana/grafana:11.2.2
+Stop it with:
+```powershell
+docker compose down
 ```
+
+The Compose file already contains the networks, volume mounts, health dependencies, ports, and dashboard provisioning. A manual three-container setup is not needed for this repository.
 
 ## 5.4 In Kubernetes
 
-`k8s/deploy.sh` already deploys Prometheus and Grafana into `heart-ml`. Prometheus finds every pod annotated `prometheus.io/scrape: "true"` and scrapes each replica separately, not through the Service.
+The Windows launcher (`scripts/start_all.ps1`) or the Unix helper (`k8s/deploy.sh`) deploys Prometheus and Grafana into `heart-ml`. Prometheus finds every pod annotated `prometheus.io/scrape: "true"` and scrapes each replica separately, not through the Service.
 
-```bash
-kubectl -n heart-ml port-forward svc/prometheus 9090:9090 &
-kubectl -n heart-ml port-forward svc/grafana 3000:3000 &
-python scripts/generate_traffic.py --url http://127.0.0.1:8000 --count 300
+```powershell
+kubectl -n heart-ml port-forward service/prometheus 9090:9090
+kubectl -n heart-ml port-forward service/grafana 3000:3000
+python scripts/generate_traffic.py --url http://127.0.0.1:8000 --count 300 --delay 0.01
 ```
-In Prometheus, Status -> Targets should list both `heart-api` pods as UP. Then open the Grafana dashboard.
+Run the two port-forwards in separate PowerShell windows. Prometheus should list both `heart-api` pods as UP. Then open the Grafana dashboard.
 
 ## 5.5 Dashboard panels (`monitoring/grafana/dashboards/heart-api.json`)
 

@@ -1,6 +1,6 @@
 # Heart Disease Risk Prediction - End-to-End MLOps
 
-A heart disease classifier trained on the UCI Cleveland dataset and served as a monitored REST API. The repo covers the full path: data acquisition, EDA, experiment tracking, a CI/CD pipeline, container build and Kubernetes deployment.
+A heart disease classifier trained on the UCI Cleveland dataset and served as a monitored REST API. The repository covers the full path: data acquisition, EDA, experiment tracking, a CI/CD pipeline, container build, and Kubernetes deployment. The verified local workflow uses Windows PowerShell, Docker Desktop, and Minikube with the Docker driver.
 
 | Stage | Tooling |
 |---|---|
@@ -32,36 +32,46 @@ tests/                 pytest suite for data, features, model and API (29 tests)
 notebooks/             01_eda, 02_training, 03_inference (executed, outputs stored)
 data/raw/              raw UCI file (re-downloadable)
 data/processed/        cleaned dataset heart_clean.csv
-scripts/               download_data.sh, smoke_test.py, generate_traffic.py
+scripts/               download_data.sh, smoke_test.py, generate_traffic.py, start_all.ps1
 samples/               example /predict payloads
-models/                trained pipeline + metadata.json (committed; regenerate with make train)
+models/                trained pipeline + metadata.json (committed; regenerate with python -m heart.train)
 reports/figures/       EDA and evaluation plots, model comparison table
 monitoring/            Prometheus config, Grafana provisioning + dashboard
 k8s/                   namespace, deployment, service, ingress, monitoring stack, deploy.sh
 .github/workflows/     ci.yml
-docs/                  setup, tools, CI/CD, deployment, monitoring, report draft
+docs/                  setup, tools, CI/CD, deployment, monitoring, assignment report
 screenshots/           evidence for the report
 Dockerfile, compose.yaml, Makefile, requirements.txt
 ```
 
-## Quick start
+## Quick start on Windows
 
-```bash
-python3.12 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-make data eda train        # download + clean, EDA plots, train and track all models
-make test lint             # 29 unit tests + flake8
-make image run smoke       # build container with podman, run it, smoke-test /predict
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\scripts\start_all.ps1
 ```
 
-Then open http://127.0.0.1:8000/docs for the interactive API, and run `make mlflow-ui` to browse experiments at http://127.0.0.1:5000.
+The launcher builds the Docker image, starts Minikube, deploys the API and monitoring stack, starts the tunnel and port-forwards, and waits for the API health check. Use one deployment mode at a time.
 
-```bash
-curl -s -X POST http://127.0.0.1:8000/predict \
-  -H 'Content-Type: application/json' \
-  --data '{"age":57,"sex":1,"cp":4,"trestbps":140,"chol":241,"fbs":0,"restecg":0,
-           "thalach":123,"exang":1,"oldpeak":0.2,"slope":2,"ca":0,"thal":7}'
-# {"prediction":1,"label":"disease","probability_disease":0.8756,"confidence":0.8756, ...}
+Open:
+
+- Swagger: http://127.0.0.1:8000/docs
+- Prometheus: http://127.0.0.1:9090/targets
+- Grafana: http://127.0.0.1:3000
+
+The local Grafana credentials are `admin` / `assignment-demo-2026` when using the launcher or the documented Compose command.
+
+For Docker Compose instead of Kubernetes:
+
+```powershell
+.\scripts\start_all.ps1 -Mode compose
+```
+
+Python is optional for the Docker serving path. To retrain, test, or generate traffic locally, create a Python 3.12 environment and follow [docs/01_SETUP.md](docs/01_SETUP.md).
+
+```powershell
+$body = Get-Content .\samples\sample_request.json -Raw
+Invoke-RestMethod http://127.0.0.1:8000/predict -Method Post -ContentType 'application/json' -Body $body
 ```
 
 ## Documentation

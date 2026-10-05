@@ -2,8 +2,9 @@
 
 **Course:** MLOps (AIMLCZG523)  
 **Student:** Kush Gunendrasing Munot (2025AE05915)  
-**Repository:** https://github.com/Kush-munot/heart-disease-mlops  
-**Demo video:** https://wilpbitspilaniacin0-my.sharepoint.com/:v:/g/personal/2025ae05915_wilp_bits-pilani_ac_in/IQDN2UoJowRAT5bRj-e8uQXwAWYs3LOH2Dwh5nXt6ajqDLc?nav=eyJyZWZlcnJhbEluZm8iOnsicmVmZXJyYWxBcHAiOiJPbmVEcml2ZUZvckJ1c2luZXNzIiwicmVmZXJyYWxBcHBQbGF0Zm9ybSI6IldlYiIsInJlZmVycmFsTW9kZSI6InZpZXciLCJyZWZlcnJhbFZpZXciOiJNeUZpbGVzTGlua0NvcHkifX0&e=E95OZA
+
+**Repository:** [Kush-munot/heart-disease-mlops](https://github.com/Kush-munot/heart-disease-mlops)
+**Demo video:** [Watch demo video](https://wilpbitspilaniacin0-my.sharepoint.com/:v:/g/personal/2025ae05915_wilp_bits-pilani_ac_in/IQDN2UoJowRAT5bRj-e8uQXwAWYs3LOH2Dwh5nXt6ajqDLc?nav=eyJyZWZlcnJhbEluZm8iOnsicmVmZXJyYWxBcHAiOiJPbmVEcml2ZUZvckJ1c2luZXNzIiwicmVmZXJyYWxBcHBQbGF0Zm9ybSI6IldlYiIsInJlZmVycmFsTW9kZSI6InZpZXciLCJyZWZlcnJhbFZpZXciOiJNeUZpbGVzTGlua0NvcHkifX0&e=E95OZA)
 
 ## Executive summary
 

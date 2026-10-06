@@ -163,7 +163,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 .\scripts\start_all.ps1
 ~~~
 
-The launcher starts Docker Desktop if needed, builds and loads the image, starts Minikube, enables Ingress and metrics-server, applies the Kubernetes resources, waits for all deployments, starts the tunnel and port-forwards, and verifies the API health endpoint.
+The launcher starts Docker Desktop if needed, builds and loads the image, starts Minikube, enables Ingress and metrics-server, applies the Kubernetes resources, waits for all deployments, starts the tunnel and port-forwards, starts the MLflow UI container, and verifies all four service URLs.
 
 The default mode is Kubernetes. Compose is an alternative:
 
@@ -256,7 +256,7 @@ kubectl -n heart-ml logs -l app=heart-api --prefix --tail=20
 
 ## 1.11 MLflow UI
 
-MLflow is separate from the Kubernetes launcher. With Python and MLflow installed:
+The launcher starts MLflow automatically at `http://127.0.0.1:5000`. To run it manually instead, use Python and MLflow:
 
 ~~~powershell
 mlflow ui --backend-store-uri .\mlruns --host 127.0.0.1 --port 5000
@@ -287,6 +287,7 @@ docker rm -f mlflow-ui
 | LoadBalancer external IP is pending | Keep minikube tunnel running or use the API port-forward. |
 | Ingress returns 404 | Send the Host header heart.local and check the Ingress resource. |
 | Port 8000, 9090, or 3000 is busy | Stop the conflicting container or port-forward. |
+| Port 5000 is busy | Stop the existing `mlflow-ui` container with `docker rm -f mlflow-ui`. |
 | PowerShell blocks the launcher | Run Set-ExecutionPolicy -Scope Process Bypass. |
 
 ## 1.13 Clean shutdown
@@ -294,6 +295,7 @@ docker rm -f mlflow-ui
 For Kubernetes:
 
 ~~~powershell
+docker rm -f mlflow-ui 2>$null
 minikube stop
 ~~~
 

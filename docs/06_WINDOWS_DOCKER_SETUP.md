@@ -75,7 +75,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 .\scripts\start_all.ps1
 ```
 
-It builds and loads the image, starts Minikube, enables Ingress and metrics-server, applies the Kubernetes resources, waits for the API, Prometheus, and Grafana deployments, and starts the tunnel and port-forwards. Use `-Mode compose` when you want the Docker Compose stack instead of Kubernetes. Do not run both modes together because they use the same local ports.
+It builds and loads the image, starts Minikube, enables Ingress and metrics-server, applies the Kubernetes resources, waits for the API, Prometheus, and Grafana deployments, starts MLflow, and starts the tunnel and port-forwards. Use `-Mode compose` when you want the Docker Compose stack instead of Kubernetes. Do not run both modes together because they use the same local ports.
 
 ## 4. Prepare Python locally
 
@@ -543,6 +543,7 @@ Delete the Kubernetes namespace and stop Minikube:
 
 ```powershell
 kubectl delete namespace heart-ml --ignore-not-found
+docker rm -f mlflow-ui 2>$null
 minikube stop
 ```
 

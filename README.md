@@ -51,13 +51,14 @@ Set-ExecutionPolicy -Scope Process Bypass
 .\scripts\start_all.ps1
 ```
 
-The launcher builds the Docker image, starts Minikube, deploys the API and monitoring stack, starts the tunnel and port-forwards, and waits for the API health check. Use one deployment mode at a time.
+The launcher starts Docker Desktop if needed, builds the image, deploys the API and monitoring stack, starts MLflow, opens the tunnel and port-forwards, and waits for all four local services. Use one deployment mode at a time.
 
 Open:
 
 - Swagger: http://127.0.0.1:8000/docs
 - Prometheus: http://127.0.0.1:9090/targets
 - Grafana: http://127.0.0.1:3000
+- MLflow: http://127.0.0.1:5000
 
 The local Grafana credentials are `admin` / `assignment-demo-2026` when using the launcher or the documented Compose command.
 
